@@ -7,9 +7,9 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   ports:
-    - port: {{ .Values.service.port }}
-      targetPort: http
+    - name: https
+      port: {{ .Values.service.port }}
       protocol: TCP
-      name: http
+      targetPort: {{ .Values.service.port }}
   selector:
     {{- include "frp-operator.selectorLabels" . | nindent 4 }}

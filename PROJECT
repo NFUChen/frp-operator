@@ -14,18 +14,18 @@ resources:
 - api:
     crdVersion: v1
     namespaced: true
-  controller: true
   domain: aureum.cloud
   group: frp
-  kind: ExitServer
+  kind: Tunnel
   path: frp-operator/api/v1
   version: v1
 - api:
     crdVersion: v1
     namespaced: true
+  controller: true
   domain: aureum.cloud
   group: frp
-  kind: Tunnel
+  kind: ExitServer
   path: frp-operator/api/v1
   version: v1
 version: "3"

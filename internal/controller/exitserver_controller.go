@@ -1,5 +1,5 @@
 /*
-Copyright 2024 Aureum Cloud, N-Bit, Niek Berenschot.
+Copyright 2026 Aureum Cloud, N-Bit, Niek Berenschot.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,18 +22,18 @@ import (
 	"frp-operator/internal/clients"
 	"frp-operator/internal/constants"
 	"frp-operator/internal/templates"
+	"time"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"time"
-
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	frpv1 "frp-operator/api/v1"
 )
@@ -44,23 +44,23 @@ type ExitServerReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=frp.aureum.cloud,resources=exitservers,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=frp.aureum.cloud,resources=exitservers/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=frp.aureum.cloud,resources=exitservers/finalizers,verbs=update
+// +kubebuilder:rbac:groups=frp.aureum.cloud,resources=exitservers,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=frp.aureum.cloud,resources=exitservers/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=frp.aureum.cloud,resources=exitservers/finalizers,verbs=update
 
-//+kubebuilder:rbac:groups=frp.aureum.cloud,resources=tunnels,verbs=get;list;watch
+// +kubebuilder:rbac:groups=frp.aureum.cloud,resources=tunnels,verbs=get;list;watch
 
-//+kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
 //
 // For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.15.0/pkg/reconcile
+// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.21.0/pkg/reconcile
 func (r *ExitServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
+	logger := logf.FromContext(ctx)
 
 	exitServer := &frpv1.ExitServer{}
 	err := r.Client.Get(ctx, req.NamespacedName, exitServer)
@@ -173,6 +173,7 @@ func (r *ExitServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 func (r *ExitServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&frpv1.ExitServer{}).
+		Named("exitserver").
 		Complete(r)
 }
 
