@@ -1,6 +1,6 @@
 apiVersion: v2
 name: frp-operator
-version: 1.0.3
+version: 1.0.4
 description: Helm chart for frp Operator
 type: application
 keywords:
@@ -16,4 +16,4 @@ maintainers:
     url: https://www.n-bit.nl
   - name: Niek Berenschot
 icon: https://raw.githubusercontent.com/Aureum-Cloud/frp-Operator/refs/heads/main/logo.png
-appVersion: "v1.0.0"
+appVersion: v1.0.1
