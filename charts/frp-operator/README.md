@@ -4,18 +4,11 @@ The **frp Kubernetes Operator** automates the deployment of FRP clients (connect
 
 ## Installation
 
-1. **Add the Helm repository:**
+**Install the FRP Operator from the OCI registry:**
 
-   ```bash
-   helm repo add frp https://frp-operator.aureum.cloud
-   helm repo update
-   ```
-
-2. **Install the FRP Operator:**
-
-   ```bash
-   helm install my-frp-operator frp/frp-operator
-   ```
+```bash
+helm install my-frp-operator oci://ghcr.io/nfuchen/charts/frp-operator --version 1.0.5
+```
 
 ## frp Overview
 
@@ -26,7 +19,7 @@ The **frp Kubernetes Operator** automates the deployment of FRP clients (connect
 | Parameter                                  | Description                          | Default                             |
 |--------------------------------------------|--------------------------------------|-------------------------------------|
 | `replicaCount`                             | Number of replicas to deploy.        | `1`                                 |
-| `image.repository`                         | Container image repository.          | `ghcr.io/aureum-cloud/frp-operator` |
+| `image.repository`                         | Container image repository.          | `ghcr.io/nfuchen/frp-operator`      |
 | `image.pullPolicy`                         | Image pull policy.                   | `Always`                            |
 | `image.tag`                                | Container image tag.                 | `""` (default tag)                  |
 | `imagePullSecrets`                         | List of image pull secrets.          | `[]`                                |

@@ -13,7 +13,7 @@
       "properties": {
         "repository": {
           "type": "string",
-          "default": "ghcr.io/aureum-cloud/frp-operator",
+          "default": "ghcr.io/nfuchen/frp-operator",
           "description": "Container image repository."
         },
         "pullPolicy": {
