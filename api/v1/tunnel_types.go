@@ -21,10 +21,18 @@ import (
 )
 
 // TunnelSpec defines the desired state of Tunnel
+// +kubebuilder:validation:XValidation:rule="has(self.tcp) != has(self.http)",message="exactly one of tcp or http must be set"
 type TunnelSpec struct {
-	ExitServer string     `json:"exitServer"`
-	TCP        *TCP       `json:"tcp"`
-	Transport  *Transport `json:"transport"`
+	ExitServer string `json:"exitServer"`
+
+	// +optional
+	TCP *TCP `json:"tcp,omitempty"`
+
+	// +optional
+	HTTP *HTTP `json:"http,omitempty"`
+
+	// +optional
+	Transport *Transport `json:"transport,omitempty"`
 }
 
 type TCP struct {
@@ -33,22 +41,85 @@ type TCP struct {
 	RemotePort int        `json:"remotePort"`
 }
 
+// HTTP exposes the tunnel as a vhost based HTTP proxy on the exit server.
+// +kubebuilder:validation:XValidation:rule="has(self.plugin) != (has(self.serviceRef) && has(self.localPort))",message="either plugin or both serviceRef and localPort must be set"
+// +kubebuilder:validation:XValidation:rule="size(self.customDomains) > 0 || has(self.subdomain)",message="at least one custom domain or a subdomain must be set"
+type HTTP struct {
+	// +optional
+	CustomDomains []string `json:"customDomains,omitempty"`
+
+	// +optional
+	Subdomain *string `json:"subdomain,omitempty"`
+
+	// +optional
+	Locations []string `json:"locations,omitempty"`
+
+	// +optional
+	HTTPUser *string `json:"httpUser,omitempty"`
+
+	// +optional
+	HTTPPassword *string `json:"httpPassword,omitempty"`
+
+	// +optional
+	HostHeaderRewrite *string `json:"hostHeaderRewrite,omitempty"`
+
+	// +optional
+	RequestHeaders map[string]string `json:"requestHeaders,omitempty"`
+
+	// +optional
+	ResponseHeaders map[string]string `json:"responseHeaders,omitempty"`
+
+	// +optional
+	RouteByHTTPUser *string `json:"routeByHTTPUser,omitempty"`
+
+	// +optional
+	ServiceRef *ServiceRef `json:"serviceRef,omitempty"`
+
+	// +optional
+	LocalPort *int `json:"localPort,omitempty"`
+
+	// +optional
+	Plugin *Plugin `json:"plugin,omitempty"`
+}
+
+// Plugin configures an frpc client plugin instead of a plain local address.
+type Plugin struct {
+	// +kubebuilder:validation:Enum=http2http;http2https
+	Type string `json:"type"`
+
+	ServiceRef ServiceRef `json:"serviceRef"`
+	LocalPort  int        `json:"localPort"`
+
+	// +optional
+	HostHeaderRewrite *string `json:"hostHeaderRewrite,omitempty"`
+
+	// +optional
+	RequestHeaders map[string]string `json:"requestHeaders,omitempty"`
+}
+
 type ServiceRef struct {
 	Name      string  `json:"name"`
 	Namespace *string `json:"namespace,omitempty"`
 }
 
 type Transport struct {
-	UseEncryption  bool `json:"useEncryption"`
-	UseCompression bool `json:"useCompression"`
+	// +optional
+	UseEncryption bool `json:"useEncryption,omitempty"`
+
+	// +optional
+	UseCompression bool `json:"useCompression,omitempty"`
 
 	// +kubebuilder:validation:Enum=v1;v2
 	// +optional
-	ProxyProtocol *string `json:"proxyProtocol"`
+	ProxyProtocol *string `json:"proxyProtocol,omitempty"`
 
 	// +kubebuilder:validation:Pattern=^\d+(KB|MB)$
 	// +optional
-	BandwidthLimit *string `json:"bandwidthLimit"`
+	BandwidthLimit *string `json:"bandwidthLimit,omitempty"`
+
+	// +kubebuilder:validation:Enum=client;server
+	// +optional
+	BandwidthLimitMode *string `json:"bandwidthLimitMode,omitempty"`
 }
 
 // TunnelStatus defines the observed state of Tunnel

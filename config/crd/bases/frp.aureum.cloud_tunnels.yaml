@@ -41,6 +41,85 @@ spec:
             properties:
               exitServer:
                 type: string
+              http:
+                description: HTTP exposes the tunnel as a vhost based HTTP proxy on
+                  the exit server.
+                properties:
+                  customDomains:
+                    items:
+                      type: string
+                    type: array
+                  hostHeaderRewrite:
+                    type: string
+                  httpPassword:
+                    type: string
+                  httpUser:
+                    type: string
+                  localPort:
+                    type: integer
+                  locations:
+                    items:
+                      type: string
+                    type: array
+                  plugin:
+                    description: Plugin configures an frpc client plugin instead of
+                      a plain local address.
+                    properties:
+                      hostHeaderRewrite:
+                        type: string
+                      localPort:
+                        type: integer
+                      requestHeaders:
+                        additionalProperties:
+                          type: string
+                        type: object
+                      serviceRef:
+                        properties:
+                          name:
+                            type: string
+                          namespace:
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      type:
+                        enum:
+                        - http2http
+                        - http2https
+                        type: string
+                    required:
+                    - localPort
+                    - serviceRef
+                    - type
+                    type: object
+                  requestHeaders:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  responseHeaders:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  routeByHTTPUser:
+                    type: string
+                  serviceRef:
+                    properties:
+                      name:
+                        type: string
+                      namespace:
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  subdomain:
+                    type: string
+                type: object
+                x-kubernetes-validations:
+                - message: either plugin or both serviceRef and localPort must be
+                    set
+                  rule: has(self.plugin) != (has(self.serviceRef) && has(self.localPort))
+                - message: at least one custom domain or a subdomain must be set
+                  rule: size(self.customDomains) > 0 || has(self.subdomain)
               tcp:
                 properties:
                   localPort:
@@ -66,6 +145,11 @@ spec:
                   bandwidthLimit:
                     pattern: ^\d+(KB|MB)$
                     type: string
+                  bandwidthLimitMode:
+                    enum:
+                    - client
+                    - server
+                    type: string
                   proxyProtocol:
                     enum:
                     - v1
@@ -75,15 +159,13 @@ spec:
                     type: boolean
                   useEncryption:
                     type: boolean
-                required:
-                - useCompression
-                - useEncryption
                 type: object
             required:
             - exitServer
-            - tcp
-            - transport
             type: object
+            x-kubernetes-validations:
+            - message: exactly one of tcp or http must be set
+              rule: has(self.tcp) != has(self.http)
           status:
             description: TunnelStatus defines the observed state of Tunnel
             type: object
