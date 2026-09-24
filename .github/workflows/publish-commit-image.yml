@@ -29,22 +29,37 @@ jobs:
 
       - name: Resolve image reference
         id: image
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PUSH_SHA: ${{ github.sha }}
+          PR_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
-          repository="$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          repository="$(echo "$REPOSITORY" | tr '[:upper:]' '[:lower:]')"
 
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            sha="${{ github.event.pull_request.head.sha }}"
-            tag="PR-${{ github.event.pull_request.number }}-${sha:0:7}"
+          image="${REGISTRY}/${repository}"
+
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            sha="$PR_SHA"
+            tag="PR-${PR_NUMBER}-${sha:0:7}"
+            tags="${image}:${tag}"
           else
-            sha="${{ github.sha }}"
+            sha="$PUSH_SHA"
             tag="${sha:0:7}"
+            tags="${image}:${tag},${image}:latest"
           fi
 
-          echo "image=${REGISTRY}/${repository}" >> "$GITHUB_OUTPUT"
+          echo "image=${image}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           echo "revision=${sha}" >> "$GITHUB_OUTPUT"
+          {
+            echo "tags<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -61,7 +76,7 @@ jobs:
         with:
           context: .
           push: true
-          tags: ${{ steps.image.outputs.image }}:${{ steps.image.outputs.tag }}
+          tags: ${{ steps.image.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ steps.image.outputs.revision }}

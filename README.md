@@ -31,10 +31,11 @@ This operator was built using the [Operator SDK](https://sdk.operatorframework.i
 
 ### Commit images
 
-Every commit pushed to `main` is published to GitHub Container Registry with its seven-character commit SHA:
+Every commit pushed to `main` is published to GitHub Container Registry with its seven-character commit SHA, and also updates the `latest` tag:
 
 ```text
 ghcr.io/<owner>/<repository>:<short-sha>
+ghcr.io/<owner>/<repository>:latest
 ```
 
 Every update to a pull request from the same repository is published as:
