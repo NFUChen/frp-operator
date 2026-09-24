@@ -293,3 +293,172 @@ func TestCreateConfigurationSortsProxiesByName(t *testing.T) {
 		t.Fatalf("expected proxies sorted by name, got:\n%s", configuration)
 	}
 }
+
+func TestCreateConfigurationRendersV071HTTPConfigurationExactly(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "kitchen-sink"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			HTTP: &frpv1.HTTP{
+				CustomDomains:     []string{"app.example.com"},
+				Subdomain:         ptr("app"),
+				Locations:         []string{"/", "/api"},
+				HTTPUser:          ptr("alice"),
+				HTTPPassword:      ptr("secret"),
+				HostHeaderRewrite: ptr("backend.example.com"),
+				RouteByHTTPUser:   ptr("alice"),
+				RequestHeaders:    map[string]string{"z-last": "1", "a-first": "2"},
+				ResponseHeaders:   map[string]string{"foo": "bar"},
+				ServiceRef:        &frpv1.ServiceRef{Name: "web", Namespace: ptr("apps")},
+				LocalPort:         ptr(8080),
+			},
+			Transport: &frpv1.Transport{
+				UseEncryption:      true,
+				UseCompression:     true,
+				ProxyProtocol:      ptr("v2"),
+				BandwidthLimit:     ptr("10MB"),
+				BandwidthLimitMode: ptr("client"),
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`serverAddr = "frps.example.com"`,
+		`serverPort = 7000`,
+		`auth.method = "token"`,
+		`auth.token = "token"`,
+		``,
+		`webServer.addr = "0.0.0.0"`,
+		`webServer.port = 7400`,
+		``,
+		`[[proxies]]`,
+		`name = "kitchen-sink"`,
+		`type = "http"`,
+		`customDomains = ["app.example.com"]`,
+		`subdomain = "app"`,
+		`locations = ["/", "/api"]`,
+		`httpUser = "alice"`,
+		`httpPassword = "secret"`,
+		`hostHeaderRewrite = "backend.example.com"`,
+		`routeByHTTPUser = "alice"`,
+		`requestHeaders.set."a-first" = "2"`,
+		`requestHeaders.set."z-last" = "1"`,
+		`responseHeaders.set."foo" = "bar"`,
+		`localIP = "web.apps.svc"`,
+		`localPort = 8080`,
+		`transport.useEncryption = true`,
+		`transport.useCompression = true`,
+		`transport.proxyProtocolVersion = "v2"`,
+		`transport.bandwidthLimit = "10MB"`,
+		`transport.bandwidthLimitMode = "client"`,
+	}, "\n")
+	if configuration != expected {
+		t.Fatalf("unexpected v0.71 configuration (-want +got):\nwant:\n%s\n\ngot:\n%s", expected, configuration)
+	}
+}
+
+func TestCreateConfigurationRendersGlobalConfigurationWithoutProxies(t *testing.T) {
+	configuration, err := CreateConfiguration(exitServer(), "token", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`serverAddr = "frps.example.com"`,
+		`serverPort = 7000`,
+		`auth.method = "token"`,
+		`auth.token = "token"`,
+		``,
+		`webServer.addr = "0.0.0.0"`,
+		`webServer.port = 7400`,
+	}, "\n")
+	if configuration != expected {
+		t.Fatalf("unexpected global configuration:\nwant:\n%s\n\ngot:\n%s", expected, configuration)
+	}
+}
+
+func TestCreateConfigurationOmitsUnsetOptionalFields(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "plain"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			TCP:        &frpv1.TCP{ServiceRef: frpv1.ServiceRef{Name: "svc"}, LocalPort: 80, RemotePort: 8080},
+			Transport:  &frpv1.Transport{UseEncryption: false, UseCompression: false},
+		},
+	}}
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, unexpected := range []string{
+		"transport.useEncryption",
+		"transport.useCompression",
+		"transport.proxyProtocolVersion",
+		"transport.bandwidthLimit",
+		"transport.bandwidthLimitMode",
+		"[proxies.plugin]",
+	} {
+		if strings.Contains(configuration, unexpected) {
+			t.Errorf("did not expect %q in configuration:\n%s", unexpected, configuration)
+		}
+	}
+}
+
+func TestCreateConfigurationDefaultsBandwidthLimitModeToServer(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "limited"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			TCP:        &frpv1.TCP{ServiceRef: frpv1.ServiceRef{Name: "svc"}, LocalPort: 80, RemotePort: 8080},
+			Transport:  &frpv1.Transport{BandwidthLimit: ptr("2MB")},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "transport.bandwidthLimit = \"2MB\"\ntransport.bandwidthLimitMode = \"server\""
+	if !strings.Contains(configuration, expected) {
+		t.Fatalf("expected default server-side bandwidth limit:\n%s", configuration)
+	}
+}
+
+func TestCreateConfigurationEscapesV071HTTPValues(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: `proxy"name`},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			HTTP: &frpv1.HTTP{
+				CustomDomains:  []string{`app."example.com`, `path\example.com`},
+				Locations:      []string{`/say/"hello"`, `/back\slash`},
+				RequestHeaders: map[string]string{`x."quoted`: `value"quoted`},
+				ServiceRef:     &frpv1.ServiceRef{Name: "web"},
+				LocalPort:      ptr(8080),
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, expected := range []string{
+		`name = "proxy\"name"`,
+		`customDomains = ["app.\"example.com", "path\\example.com"]`,
+		`locations = ["/say/\"hello\"", "/back\\slash"]`,
+		`requestHeaders.set."x.\"quoted" = "value\"quoted"`,
+	} {
+		if !strings.Contains(configuration, expected) {
+			t.Errorf("expected escaped value %q in configuration:\n%s", expected, configuration)
+		}
+	}
+}
