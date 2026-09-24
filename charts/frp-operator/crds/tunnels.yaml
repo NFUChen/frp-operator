@@ -44,8 +44,44 @@ spec:
             spec:
               description: TunnelSpec defines the desired state of Tunnel
               properties:
+                annotations:
+                  additionalProperties:
+                    type: string
+                  type: object
+                enabled:
+                  type: boolean
                 exitServer:
                   type: string
+                healthCheck:
+                  properties:
+                    httpHeaders:
+                      items:
+                        properties:
+                          name:
+                            type: string
+                          value:
+                            type: string
+                        required:
+                          - name
+                          - value
+                        type: object
+                      type: array
+                    intervalSeconds:
+                      type: integer
+                    maxFailed:
+                      type: integer
+                    path:
+                      type: string
+                    timeoutSeconds:
+                      type: integer
+                    type:
+                      enum:
+                        - tcp
+                        - http
+                      type: string
+                  required:
+                    - type
+                  type: object
                 http:
                   description: HTTP exposes the tunnel as a vhost based HTTP proxy on the exit server.
                   properties:
@@ -67,11 +103,25 @@ spec:
                       type: array
                     plugin:
                       description: Plugin configures an frpc client plugin instead of a plain local address.
-                      properties:
+                      properties: &pluginProperties
+                        crtPath:
+                          type: string
+                        enableHTTP2:
+                          type: boolean
                         hostHeaderRewrite:
+                          type: string
+                        httpPassword:
+                          type: string
+                        httpUser:
+                          type: string
+                        keyPath:
+                          type: string
+                        localPath:
                           type: string
                         localPort:
                           type: integer
+                        password:
+                          type: string
                         requestHeaders:
                           additionalProperties:
                             type: string
@@ -85,16 +135,31 @@ spec:
                           required:
                             - name
                           type: object
+                        stripPrefix:
+                          type: string
                         type:
                           enum:
                             - http2http
                             - http2https
+                            - http_proxy
+                            - https2http
+                            - https2https
+                            - socks5
+                            - static_file
+                            - unix_domain_socket
+                            - tls2raw
+                            - virtual_net
+                          type: string
+                        unixPath:
+                          type: string
+                        username:
                           type: string
                       required:
-                        - localPort
-                        - serviceRef
                         - type
                       type: object
+                      x-kubernetes-validations: &pluginValidations
+                        - message: this plugin type requires both serviceRef and localPort
+                          rule: '!(self.type in [''http2http'', ''http2https'', ''https2http'', ''https2https'', ''tls2raw'']) || (has(self.serviceRef) && self.serviceRef.name != '''' && has(self.localPort) && self.localPort > 0)'
                     requestHeaders:
                       additionalProperties:
                         type: string
@@ -119,13 +184,90 @@ spec:
                   type: object
                   x-kubernetes-validations:
                     - message: either plugin or both serviceRef and localPort must be set
-                      rule: has(self.plugin) != (has(self.serviceRef) && has(self.localPort))
+                      rule: has(self.plugin) != (has(self.serviceRef) && self.serviceRef.name != '' && has(self.localPort) && self.localPort > 0)
                     - message: at least one custom domain or a subdomain must be set
                       rule: size(self.customDomains) > 0 || has(self.subdomain)
+                https:
+                  properties:
+                    customDomains:
+                      items:
+                        type: string
+                      type: array
+                    localPort:
+                      type: integer
+                    plugin:
+                      description: Plugin configures an frpc client plugin instead of a plain local address.
+                      properties: *pluginProperties
+                      required:
+                        - type
+                      type: object
+                      x-kubernetes-validations: *pluginValidations
+                    serviceRef: &serviceRef
+                      properties:
+                        name:
+                          type: string
+                        namespace:
+                          type: string
+                      required:
+                        - name
+                      type: object
+                    subdomain:
+                      type: string
+                  type: object
+                  x-kubernetes-validations:
+                    - message: either plugin or both serviceRef and localPort must be set
+                      rule: has(self.plugin) != (has(self.serviceRef) && self.serviceRef.name != '' && has(self.localPort) && self.localPort > 0)
+                    - message: at least one custom domain or a subdomain must be set
+                      rule: size(self.customDomains) > 0 || has(self.subdomain)
+                loadBalancer:
+                  properties:
+                    group:
+                      type: string
+                    groupKey:
+                      type: string
+                  required:
+                    - group
+                  type: object
+                metadatas:
+                  additionalProperties:
+                    type: string
+                  type: object
+                stcp: &secretProxy
+                  properties:
+                    allowUsers:
+                      items:
+                        type: string
+                      type: array
+                    localPort:
+                      type: integer
+                    plugin:
+                      description: Plugin configures an frpc client plugin instead of a plain local address.
+                      properties: *pluginProperties
+                      required:
+                        - type
+                      type: object
+                      x-kubernetes-validations: *pluginValidations
+                    secretKey:
+                      type: string
+                    serviceRef: *serviceRef
+                  required:
+                    - secretKey
+                  type: object
+                  x-kubernetes-validations:
+                    - message: either plugin or both serviceRef and localPort must be set
+                      rule: has(self.plugin) != (has(self.serviceRef) && self.serviceRef.name != '' && has(self.localPort) && self.localPort > 0)
+                sudp: *secretProxy
                 tcp:
                   properties:
                     localPort:
                       type: integer
+                    plugin:
+                      description: Plugin configures an frpc client plugin instead of a plain local address.
+                      properties: *pluginProperties
+                      required:
+                        - type
+                      type: object
+                      x-kubernetes-validations: *pluginValidations
                     remotePort:
                       type: integer
                     serviceRef:
@@ -138,14 +280,41 @@ spec:
                         - name
                       type: object
                   required:
-                    - localPort
                     - remotePort
+                  type: object
+                  x-kubernetes-validations:
+                    - message: either plugin or both serviceRef and localPort must be set
+                      rule: has(self.plugin) != (has(self.serviceRef) && self.serviceRef.name != '' && has(self.localPort) && self.localPort > 0)
+                tcpmux:
+                  properties:
+                    customDomains:
+                      items:
+                        type: string
+                      type: array
+                    httpPassword:
+                      type: string
+                    httpUser:
+                      type: string
+                    localPort:
+                      type: integer
+                    multiplexer:
+                      enum:
+                        - httpconnect
+                      type: string
+                    routeByHTTPUser:
+                      type: string
+                    serviceRef: *serviceRef
+                    subdomain:
+                      type: string
+                  required:
+                    - localPort
+                    - multiplexer
                     - serviceRef
                   type: object
                 transport:
                   properties:
                     bandwidthLimit:
-                      pattern: ^\d+(KB|MB)$
+                      pattern: ^\d+(\.\d+)?(KB|MB)$
                       type: string
                     bandwidthLimitMode:
                       enum:
@@ -162,12 +331,48 @@ spec:
                     useEncryption:
                       type: boolean
                   type: object
+                udp:
+                  properties:
+                    localPort:
+                      type: integer
+                    remotePort:
+                      type: integer
+                    serviceRef: *serviceRef
+                  required:
+                    - localPort
+                    - remotePort
+                    - serviceRef
+                  type: object
+                xtcp:
+                  <<: *secretProxy
+                  properties:
+                    allowUsers:
+                      items:
+                        type: string
+                      type: array
+                    localPort:
+                      type: integer
+                    natTraversal:
+                      properties:
+                        disableAssistedAddrs:
+                          type: boolean
+                      type: object
+                    plugin:
+                      description: Plugin configures an frpc client plugin instead of a plain local address.
+                      properties: *pluginProperties
+                      required:
+                        - type
+                      type: object
+                      x-kubernetes-validations: *pluginValidations
+                    secretKey:
+                      type: string
+                    serviceRef: *serviceRef
               required:
                 - exitServer
               type: object
               x-kubernetes-validations:
-                - message: exactly one of tcp or http must be set
-                  rule: has(self.tcp) != has(self.http)
+                - message: exactly one proxy type must be set
+                  rule: '[has(self.tcp), has(self.udp), has(self.http), has(self.https), has(self.tcpmux), has(self.stcp), has(self.xtcp), has(self.sudp)].filter(x, x).size() == 1'
             status:
               description: TunnelStatus defines the observed state of Tunnel
               type: object

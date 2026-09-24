@@ -2,5 +2,6 @@
 resources:
 - frp_v1_tunnel.yaml
 - frp_v1_tunnel_http.yaml
+- frp_v1_tunnel_v071.yaml
 - frp_v1_exitserver.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

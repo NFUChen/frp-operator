@@ -6,6 +6,7 @@ import (
 
 	frpv1 "frp-operator/api/v1"
 
+	"github.com/pelletier/go-toml/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -410,7 +411,7 @@ func TestCreateConfigurationOmitsUnsetOptionalFields(t *testing.T) {
 	}
 }
 
-func TestCreateConfigurationDefaultsBandwidthLimitModeToServer(t *testing.T) {
+func TestCreateConfigurationDefaultsBandwidthLimitModeToClient(t *testing.T) {
 	tunnels := []frpv1.Tunnel{{
 		ObjectMeta: metav1.ObjectMeta{Name: "limited"},
 		Spec: frpv1.TunnelSpec{
@@ -425,9 +426,9 @@ func TestCreateConfigurationDefaultsBandwidthLimitModeToServer(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := "transport.bandwidthLimit = \"2MB\"\ntransport.bandwidthLimitMode = \"server\""
+	expected := "transport.bandwidthLimit = \"2MB\"\ntransport.bandwidthLimitMode = \"client\""
 	if !strings.Contains(configuration, expected) {
-		t.Fatalf("expected default server-side bandwidth limit:\n%s", configuration)
+		t.Fatalf("expected default client-side bandwidth limit:\n%s", configuration)
 	}
 }
 
@@ -460,5 +461,549 @@ func TestCreateConfigurationEscapesV071HTTPValues(t *testing.T) {
 		if !strings.Contains(configuration, expected) {
 			t.Errorf("expected escaped value %q in configuration:\n%s", expected, configuration)
 		}
+	}
+}
+
+func TestCreateConfigurationProducesValidTOMLWithControlCharacters(t *testing.T) {
+	tunnels := []frpv1.Tunnel{
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "plugin\ttunnel"},
+			Spec: frpv1.TunnelSpec{
+				ExitServer: "guest-frps",
+				HTTP: &frpv1.HTTP{
+					CustomDomains: []string{"app.example.com"},
+					Plugin: &frpv1.Plugin{
+						Type:       "http2http",
+						ServiceRef: frpv1.ServiceRef{Name: "web"},
+						LocalPort:  8080,
+					},
+				},
+				Annotations: map[string]string{"owner\x01": "platform\nteam"},
+				Metadatas:   map[string]string{"environment": "prod\x7f"},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{Name: "tcp-tunnel"},
+			Spec: frpv1.TunnelSpec{
+				ExitServer: "guest-frps",
+				TCP: &frpv1.TCP{
+					ServiceRef: frpv1.ServiceRef{Name: "api"},
+					LocalPort:  8080,
+					RemotePort: 18080,
+				},
+			},
+		},
+	}
+
+	configuration, err := CreateConfiguration(exitServer(), "token\x02", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(configuration), &parsed); err != nil {
+		t.Fatalf("configuration is not valid TOML: %v\n%s", err, configuration)
+	}
+
+	proxies, ok := parsed["proxies"].([]any)
+	if !ok || len(proxies) != 2 {
+		t.Fatalf("expected two parsed proxies, got %#v", parsed["proxies"])
+	}
+	first, ok := proxies[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected first proxy to be a table, got %#v", proxies[0])
+	}
+	if first["name"] != "plugin\ttunnel" {
+		t.Fatalf("expected control characters to round-trip, got %#v", first["name"])
+	}
+	if _, ok := first["plugin"].(map[string]any); !ok {
+		t.Fatalf("expected plugin table on first proxy, got %#v", first["plugin"])
+	}
+	if _, ok := first["annotations"].(map[string]any); !ok {
+		t.Fatalf("expected annotations table on first proxy, got %#v", first["annotations"])
+	}
+	second, ok := proxies[1].(map[string]any)
+	if !ok || second["name"] != "tcp-tunnel" || second["remotePort"] != int64(18080) {
+		t.Fatalf("expected second proxy fields to remain top-level, got %#v", proxies[1])
+	}
+}
+
+// proxySection returns the rendered `[[proxies]]` block of the first proxy.
+func proxySection(t *testing.T, configuration string) string {
+	t.Helper()
+
+	index := strings.Index(configuration, "[[proxies]]")
+	if index < 0 {
+		t.Fatalf("expected a proxy section in configuration:\n%s", configuration)
+	}
+	return configuration[index:]
+}
+
+func TestCreateConfigurationRendersUDPProxy(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "udp-tunnel"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			UDP: &frpv1.UDP{
+				ServiceRef: frpv1.ServiceRef{Name: "dns", Namespace: ptr("infra")},
+				LocalPort:  53,
+				RemotePort: 5353,
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "udp-tunnel"`,
+		`type = "udp"`,
+		`localIP = "dns.infra.svc"`,
+		`localPort = 53`,
+		`remotePort = 5353`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected udp proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersHTTPSProxy(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "https-tunnel"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			HTTPS: &frpv1.HTTPS{
+				CustomDomains: []string{"secure.example.com"},
+				ServiceRef:    &frpv1.ServiceRef{Name: "web", Namespace: ptr("apps")},
+				LocalPort:     ptr(8443),
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "https-tunnel"`,
+		`type = "https"`,
+		`customDomains = ["secure.example.com"]`,
+		`localIP = "web.apps.svc"`,
+		`localPort = 8443`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected https proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersHTTPSProxyWithHTTPS2HTTPPlugin(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "https-plugin"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			HTTPS: &frpv1.HTTPS{
+				Subdomain: ptr("secure"),
+				Plugin: &frpv1.Plugin{
+					Type:              "https2http",
+					ServiceRef:        frpv1.ServiceRef{Name: "web"},
+					LocalPort:         80,
+					HostHeaderRewrite: ptr("backend.example.com"),
+					CrtPath:           ptr("/certs/tls.crt"),
+					KeyPath:           ptr("/certs/tls.key"),
+					RequestHeaders:    map[string]string{"x-from-where": "frp"},
+				},
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "https-plugin"`,
+		`type = "https"`,
+		`subdomain = "secure"`,
+		``,
+		`[proxies.plugin]`,
+		`type = "https2http"`,
+		`localAddr = "web:80"`,
+		`hostHeaderRewrite = "backend.example.com"`,
+		`crtPath = "/certs/tls.crt"`,
+		`keyPath = "/certs/tls.key"`,
+		`requestHeaders.set."x-from-where" = "frp"`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected https2http proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersTCPMuxProxy(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "mux-tunnel"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			TCPMux: &frpv1.TCPMux{
+				Multiplexer:     "httpconnect",
+				CustomDomains:   []string{"mux.example.com"},
+				HTTPUser:        ptr("alice"),
+				HTTPPassword:    ptr("secret"),
+				RouteByHTTPUser: ptr("alice"),
+				ServiceRef:      frpv1.ServiceRef{Name: "backend"},
+				LocalPort:       8080,
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "mux-tunnel"`,
+		`type = "tcpmux"`,
+		`multiplexer = "httpconnect"`,
+		`customDomains = ["mux.example.com"]`,
+		`httpUser = "alice"`,
+		`httpPassword = "secret"`,
+		`routeByHTTPUser = "alice"`,
+		`localIP = "backend"`,
+		`localPort = 8080`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected tcpmux proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersSTCPProxy(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "stcp-tunnel"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			STCP: &frpv1.SecretProxy{
+				SecretKey:  "abcdefg",
+				AllowUsers: []string{"user1", "user2"},
+				ServiceRef: frpv1.ServiceRef{Name: "ssh", Namespace: ptr("infra")},
+				LocalPort:  22,
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "stcp-tunnel"`,
+		`type = "stcp"`,
+		`secretKey = "abcdefg"`,
+		`allowUsers = ["user1", "user2"]`,
+		`localIP = "ssh.infra.svc"`,
+		`localPort = 22`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected stcp proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersSUDPProxy(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "sudp-tunnel"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			SUDP: &frpv1.SecretProxy{
+				SecretKey:  "abcdefg",
+				ServiceRef: frpv1.ServiceRef{Name: "dns"},
+				LocalPort:  53,
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "sudp-tunnel"`,
+		`type = "sudp"`,
+		`secretKey = "abcdefg"`,
+		`localIP = "dns"`,
+		`localPort = 53`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected sudp proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersXTCPProxyWithNatTraversal(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "xtcp-tunnel"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer: "guest-frps",
+			XTCP: &frpv1.XTCP{
+				SecretProxy: frpv1.SecretProxy{
+					SecretKey:  "abcdefg",
+					AllowUsers: []string{"*"},
+					ServiceRef: frpv1.ServiceRef{Name: "ssh"},
+					LocalPort:  22,
+				},
+				NatTraversal: &frpv1.NatTraversal{DisableAssistedAddrs: true},
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "xtcp-tunnel"`,
+		`type = "xtcp"`,
+		`secretKey = "abcdefg"`,
+		`allowUsers = ["*"]`,
+		`localIP = "ssh"`,
+		`localPort = 22`,
+		``,
+		`[proxies.natTraversal]`,
+		`disableAssistedAddrs = true`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected xtcp proxy:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationRendersCommonProxyOptions(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "common"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer:  "guest-frps",
+			Enabled:     ptr(false),
+			Metadatas:   map[string]string{"z-last": "1", "a-first": "2"},
+			Annotations: map[string]string{"k8s.io/owner": "team"},
+			LoadBalancer: &frpv1.LoadBalancer{
+				Group:    "web",
+				GroupKey: ptr("123"),
+			},
+			HealthCheck: &frpv1.HealthCheck{
+				Type:            "http",
+				Path:            ptr("/status"),
+				TimeoutSeconds:  ptr(3),
+				MaxFailed:       ptr(3),
+				IntervalSeconds: ptr(10),
+				HTTPHeaders:     []frpv1.HTTPHeader{{Name: "x-from-where", Value: "frp"}},
+			},
+			TCP: &frpv1.TCP{
+				ServiceRef: frpv1.ServiceRef{Name: "web"},
+				LocalPort:  8080,
+				RemotePort: 18080,
+			},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := strings.Join([]string{
+		`[[proxies]]`,
+		`name = "common"`,
+		`type = "tcp"`,
+		`localIP = "web"`,
+		`localPort = 8080`,
+		`remotePort = 18080`,
+		`enabled = false`,
+		`loadBalancer.group = "web"`,
+		`loadBalancer.groupKey = "123"`,
+		`healthCheck.type = "http"`,
+		`healthCheck.timeoutSeconds = 3`,
+		`healthCheck.maxFailed = 3`,
+		`healthCheck.intervalSeconds = 10`,
+		`healthCheck.path = "/status"`,
+		`healthCheck.httpHeaders = [{ name = "x-from-where", value = "frp" }]`,
+		`metadatas."a-first" = "2"`,
+		`metadatas."z-last" = "1"`,
+		``,
+		`[proxies.annotations]`,
+		`"k8s.io/owner" = "team"`,
+	}, "\n")
+	if proxySection(t, configuration) != expected {
+		t.Fatalf("unexpected common options:\nwant:\n%s\n\ngot:\n%s", expected, proxySection(t, configuration))
+	}
+}
+
+func TestCreateConfigurationKeepsCommonFieldsOutOfPluginTable(t *testing.T) {
+	tunnels := []frpv1.Tunnel{{
+		ObjectMeta: metav1.ObjectMeta{Name: "scope"},
+		Spec: frpv1.TunnelSpec{
+			ExitServer:  "guest-frps",
+			Metadatas:   map[string]string{"env": "prod"},
+			HealthCheck: &frpv1.HealthCheck{Type: "tcp"},
+			HTTP: &frpv1.HTTP{
+				CustomDomains: []string{"app.example.com"},
+				Plugin: &frpv1.Plugin{
+					Type:       "http2http",
+					ServiceRef: frpv1.ServiceRef{Name: "web"},
+					LocalPort:  80,
+				},
+			},
+			Transport: &frpv1.Transport{UseEncryption: true},
+		},
+	}}
+
+	configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	pluginTable := strings.Index(configuration, "[proxies.plugin]")
+	if pluginTable < 0 {
+		t.Fatalf("expected a plugin table, got:\n%s", configuration)
+	}
+	for _, commonField := range []string{
+		"transport.useEncryption",
+		"healthCheck.type",
+		`metadatas."env"`,
+	} {
+		index := strings.Index(configuration, commonField)
+		if index < 0 {
+			t.Errorf("expected %q in configuration:\n%s", commonField, configuration)
+			continue
+		}
+		if index > pluginTable {
+			t.Errorf("%q must be rendered before [proxies.plugin] to stay in the proxy table:\n%s", commonField, configuration)
+		}
+	}
+}
+
+func TestCreateConfigurationRendersPluginVariants(t *testing.T) {
+	testCases := []struct {
+		name     string
+		plugin   frpv1.Plugin
+		expected []string
+		omitted  []string
+	}{
+		{
+			name: "http_proxy",
+			plugin: frpv1.Plugin{
+				Type:         "http_proxy",
+				HTTPUser:     ptr("abc"),
+				HTTPPassword: ptr("abc"),
+			},
+			expected: []string{`type = "http_proxy"`, `httpUser = "abc"`, `httpPassword = "abc"`},
+			omitted:  []string{"localAddr"},
+		},
+		{
+			name: "socks5",
+			plugin: frpv1.Plugin{
+				Type:     "socks5",
+				Username: ptr("abc"),
+				Password: ptr("abc"),
+			},
+			expected: []string{`type = "socks5"`, `username = "abc"`, `password = "abc"`},
+			omitted:  []string{"localAddr"},
+		},
+		{
+			name: "static_file",
+			plugin: frpv1.Plugin{
+				Type:         "static_file",
+				LocalPath:    ptr("/var/www/blog"),
+				StripPrefix:  ptr("static"),
+				HTTPUser:     ptr("abc"),
+				HTTPPassword: ptr("abc"),
+			},
+			expected: []string{`type = "static_file"`, `localPath = "/var/www/blog"`, `stripPrefix = "static"`},
+			omitted:  []string{"localAddr"},
+		},
+		{
+			name: "unix_domain_socket",
+			plugin: frpv1.Plugin{
+				Type:     "unix_domain_socket",
+				UnixPath: ptr("/var/run/docker.sock"),
+			},
+			expected: []string{`type = "unix_domain_socket"`, `unixPath = "/var/run/docker.sock"`},
+			omitted:  []string{"localAddr"},
+		},
+		{
+			name: "tls2raw",
+			plugin: frpv1.Plugin{
+				Type:       "tls2raw",
+				ServiceRef: frpv1.ServiceRef{Name: "web"},
+				LocalPort:  80,
+				CrtPath:    ptr("/certs/tls.crt"),
+				KeyPath:    ptr("/certs/tls.key"),
+			},
+			expected: []string{`type = "tls2raw"`, `localAddr = "web:80"`, `crtPath = "/certs/tls.crt"`, `keyPath = "/certs/tls.key"`},
+		},
+		{
+			name:     "virtual_net",
+			plugin:   frpv1.Plugin{Type: "virtual_net"},
+			expected: []string{`type = "virtual_net"`},
+			omitted:  []string{"localAddr"},
+		},
+		{
+			name: "https2https",
+			plugin: frpv1.Plugin{
+				Type:        "https2https",
+				ServiceRef:  frpv1.ServiceRef{Name: "web"},
+				LocalPort:   443,
+				CrtPath:     ptr("/certs/tls.crt"),
+				KeyPath:     ptr("/certs/tls.key"),
+				EnableHTTP2: ptr(true),
+			},
+			expected: []string{`type = "https2https"`, `localAddr = "web:443"`, `enableHTTP2 = true`},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			plugin := testCase.plugin
+			tunnels := []frpv1.Tunnel{{
+				ObjectMeta: metav1.ObjectMeta{Name: "plugin"},
+				Spec: frpv1.TunnelSpec{
+					ExitServer: "guest-frps",
+					TCP: &frpv1.TCP{
+						ServiceRef: frpv1.ServiceRef{Name: "unused"},
+						LocalPort:  1,
+						RemotePort: 6000,
+						Plugin:     &plugin,
+					},
+				},
+			}}
+
+			configuration, err := CreateConfiguration(exitServer(), "token", tunnels)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			for _, expected := range testCase.expected {
+				if !strings.Contains(configuration, expected) {
+					t.Errorf("expected %q in configuration:\n%s", expected, configuration)
+				}
+			}
+			for _, omitted := range testCase.omitted {
+				if strings.Contains(configuration, omitted) {
+					t.Errorf("did not expect %q in configuration:\n%s", omitted, configuration)
+				}
+			}
+			if strings.Contains(configuration, "localIP =") {
+				t.Errorf("plugin backed proxy must not render localIP:\n%s", configuration)
+			}
+		})
 	}
 }
