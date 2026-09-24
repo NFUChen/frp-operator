@@ -33,17 +33,11 @@ This operator was built using the [Operator SDK](https://sdk.operatorframework.i
 
 To install the frp Operator using Helm, follow these steps:
 
-1. Add the frp Helm repository:
+Install the frp Operator from the OCI registry:
 
-    ```bash
-    helm repo add frp https://frp-operator.aureum.cloud
-    ```
-
-2. Install the frp Operator:
-
-    ```bash
-    helm install my-frp-operator frp/frp-operator --version 1.0.0
-    ```
+```bash
+helm install my-frp-operator oci://ghcr.io/nfuchen/charts/frp-operator --version 1.0.5
+```
 
    This will deploy the frp operator into your Kubernetes cluster.
 

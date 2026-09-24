@@ -1,13 +1,13 @@
 apiVersion: v2
 name: frp-operator
-version: 1.0.4
+version: 1.0.5
 description: Helm chart for frp Operator
 type: application
 keywords:
   - reverse-proxy
   - tunnel
   - operator
-home: https://github.com/Aureum-Cloud/frp-Operator
+home: https://github.com/NFUChen/frp-operator
 maintainers:
   - name: Aureum Cloud
     url: https://www.aureum.cloud
@@ -16,4 +16,4 @@ maintainers:
     url: https://www.n-bit.nl
   - name: Niek Berenschot
 icon: https://raw.githubusercontent.com/Aureum-Cloud/frp-Operator/refs/heads/main/logo.png
-appVersion: v1.0.1
+appVersion: v1.0.2
