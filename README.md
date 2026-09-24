@@ -134,6 +134,43 @@ spec:
 
 See `config/samples/frp_v1_tunnel_v071.yaml` for UDP, HTTPS plugin, TCPMux, STCP, XTCP, SUDP, load-balancing, and health-check examples.
 
+## Kubernetes Ingress Adapter
+
+The operator can translate built-in `networking.k8s.io/v1` Ingress rules into managed HTTP `Tunnel` resources. Create an `IngressClass` with controller `frp.aureum.cloud/ingress-controller`, select it with `spec.ingressClassName`, and annotate the Ingress with the namespace-local ExitServer name:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: IngressClass
+metadata:
+  name: frp
+spec:
+  controller: frp.aureum.cloud/ingress-controller
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: example
+  annotations:
+    frp.aureum.cloud/exit-server: exit-server-sample
+spec:
+  ingressClassName: frp
+  rules:
+  - host: example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: example
+            port:
+              number: 8080
+```
+
+Each host/path/backend becomes an Ingress-owned Tunnel. Service port names are resolved to their numeric Service port. The initial adapter supports HTTP rules with non-empty hosts and `Prefix` or `ImplementationSpecific` paths. TLS, `defaultBackend`, resource backends, hostless rules, and `Exact` paths are rejected because they cannot be represented faithfully by the current FRP Tunnel model.
+
+See `config/samples/frp_v1_ingress.yaml` for a complete example.
+
 ## Commands
 
 ### Get Exit Servers
