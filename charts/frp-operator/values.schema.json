@@ -23,8 +23,8 @@
         },
         "tag": {
           "type": "string",
-          "default": "",
-          "description": "Container image tag (empty uses default tag)."
+          "default": "latest",
+          "description": "Container image tag."
         }
       },
       "required": ["repository", "pullPolicy"]
