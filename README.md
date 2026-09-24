@@ -110,6 +110,17 @@ spec:
 ### Tunnel Configuration
 
 - **exitServer**: Reference to the associated ExitServer.
+- Exactly one proxy type must be configured: `tcp`, `udp`, `http`, `https`, `tcpmux`, `stcp`, `xtcp`, or `sudp`.
+- **tcp / udp**: Port-forwarding proxy configuration.
+- **http / https**: Virtual-host proxy configuration using `customDomains` or `subdomain`.
+- **tcpmux**: TCP multiplexing using the `httpconnect` multiplexer.
+- **stcp / xtcp / sudp**: Secret-key protected visitor proxy configuration. XTCP additionally supports `natTraversal`.
+- **serviceRef / localPort**: Kubernetes service backend. Proxy types that support plugins use either this backend or `plugin`, but not both.
+- **plugin**: frpc client plugin. Supported plugin types are `http2http`, `http2https`, `https2http`, `https2https`, `http_proxy`, `socks5`, `static_file`, `unix_domain_socket`, `tls2raw`, and `virtual_net`.
+- **enabled**: Explicitly disable a proxy by setting this to `false`.
+- **annotations / metadatas**: frp proxy annotations and metadata.
+- **loadBalancer**: frp load-balancer `group` and optional `groupKey`.
+- **healthCheck**: TCP or HTTP health checking, including intervals, timeout, failure threshold, path, and headers.
 - **tcp**: TCP configuration for the tunnel.
   - **localPort**: Local port to expose.
   - **remotePort**: Remote port on the exit server.
@@ -118,7 +129,10 @@ spec:
   - **useEncryption**: Enable or disable encryption.
   - **useCompression**: Enable or disable compression.
   - **proxyProtocol**: Proxy protocol version.
-  - **bandwidthLimit**: Bandwidth limit for the tunnel.
+  - **bandwidthLimit**: Bandwidth limit such as `100MB` or `1.5MB`.
+  - **bandwidthLimitMode**: `client` or `server`; frp v0.71.0 defaults to `client` when a limit is configured.
+
+See `config/samples/frp_v1_tunnel_v071.yaml` for UDP, HTTPS plugin, TCPMux, STCP, XTCP, SUDP, load-balancing, and health-check examples.
 
 ## Commands
 
