@@ -29,6 +29,22 @@ The frp Kubernetes Operator simplifies the deployment of frp clients and tunnels
 
 This operator was built using the [Operator SDK](https://sdk.operatorframework.io/docs/building-operators/), a toolkit that simplifies the creation of Kubernetes operators. The SDK streamlines the process of defining, developing, and deploying custom resources.
 
+### Commit images
+
+Every commit pushed to `main` is published to GitHub Container Registry with its seven-character commit SHA:
+
+```text
+ghcr.io/<owner>/<repository>:<short-sha>
+```
+
+Every update to a pull request from the same repository is published as:
+
+```text
+ghcr.io/<owner>/<repository>:PR-<number>-<short-sha>
+```
+
+For example: `ghcr.io/example/frp-operator:PR-42-a1b2c3d`. Fork pull requests do not publish images because GitHub does not grant them package write access.
+
 ## Installation via Helm
 
 To install the frp Operator using Helm, follow these steps:
